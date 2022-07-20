@@ -23,7 +23,7 @@ import cv2
 #import tqdm
 
 print("Loading model...")
-pytesseract.pytesseract.tesseract_cmd = r'D:\Documents\ALPR\tesseract\tesseract.exe'
+pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 print('Tesseract Engine:', pytesseract.get_tesseract_version())
 
 '''class Train:
