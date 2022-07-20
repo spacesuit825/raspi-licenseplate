@@ -5,6 +5,7 @@ import os
 from picamera.array import PiRGBArray
 from picamera import PiCamera
 import datetime
+import time
 
 import tflite_runtime.interpreter as tflite
 
