@@ -446,7 +446,8 @@ def test():
     detector = ObjectDetector(model_path=TFLITE_MODEL_PATH, options=options)
 
     for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
-    
+        
+        frame = frame.array
         frame = np.array(frame)
         frame = Image.fromarray(frame)
         frame.thumbnail((512, 512), Image.ANTIALIAS)
