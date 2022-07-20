@@ -436,7 +436,7 @@ def test():
 
     DETECTION_THRESHOLD = 0.3
     TFLITE_MODEL_PATH = "./android.tflite"
-    IMG_PATH = './image.jpg'
+    #IMG_PATH = './image.jpg'
 
     options = ObjectDetectorOptions(
             num_threads=4,
@@ -447,8 +447,8 @@ def test():
 
     for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     
-        frame = Image.open(IMG_PATH)
-        frame.thumbnail((512, 512), Image.ANTIALIAS)
+        #frame = Image.open(IMG_PATH)
+        #frame.thumbnail((512, 512), Image.ANTIALIAS)
         image_np = np.asarray(frame)
         #image_np = image_np.resize((640, 480))
 
