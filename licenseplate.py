@@ -2,6 +2,9 @@
 from tflite_support import metadata
 import numpy as np
 import os
+from picamera.array import PiRGBArray
+from picamera import PiCamera
+import datetime
 
 import tflite_runtime.interpreter as tflite
 
@@ -422,13 +425,13 @@ def write_to_json(now, plate_number):
 
 
 def test():
-    ''''Running detection now...'
+    'Running detection now...'
     camera = PiCamera()
     camera.resolution = (640, 480)
     camera.framerate = 32
     rawCapture = PiRGBArray(camera, size=(640, 480))
 
-    time.sleep(0.5)'''
+    time.sleep(0.5)
 
     DETECTION_THRESHOLD = 0.3
     TFLITE_MODEL_PATH = "./android.tflite"
@@ -441,29 +444,29 @@ def test():
 
     detector = ObjectDetector(model_path=TFLITE_MODEL_PATH, options=options)
 
-    #for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
+    for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     
-    frame = Image.open(IMG_PATH)
-    frame.thumbnail((512, 512), Image.ANTIALIAS)
-    image_np = np.asarray(frame)
-    #image_np = image_np.resize((640, 480))
+        frame = Image.open(IMG_PATH)
+        frame.thumbnail((512, 512), Image.ANTIALIAS)
+        image_np = np.asarray(frame)
+        #image_np = image_np.resize((640, 480))
 
-    # Load the TFLite model
+        # Load the TFLite model
 
-    detections = detector.detect(image_np)
+        detections = detector.detect(image_np)
 
-    image_np, plate_ls = visualize(image_np, detections)
+        image_np, plate_ls = visualize(image_np, detections)
 
-    for pl in plate_ls:
-        processed_img = process_image(pl)
+        for pl in plate_ls:
+            processed_img = process_image(pl)
 
-        tess_config = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 --psm 13 --oem 3 -c tessedit_do_invert=0"
-        
-        plate_number = pytesseract.image_to_string(processed_img, lang ='eng', config = tess_config)
+            tess_config = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 --psm 13 --oem 3 -c tessedit_do_invert=0"
+            
+            plate_number = pytesseract.image_to_string(processed_img, lang ='eng', config = tess_config)
 
-        #now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        #write_to_json(now, plate_number)
-        print(plate_number)
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            write_to_json(now, plate_number)
+            print(plate_number)
     cv2.imshow('img', image_np)
     cv2.waitKey()
 
