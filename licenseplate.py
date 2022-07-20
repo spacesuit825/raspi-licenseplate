@@ -1,25 +1,15 @@
 ## Code to train and test the ANPR model.
-
-from concurrent.futures import process
 from tflite_support import metadata
 import numpy as np
 import os
-from picamera.array import PiRGBArray
-from picamera import PiCamera
-import time
-import datetime
 
-from tflite_model_maker.config import ExportFormat, QuantizationConfig
-from tflite_model_maker import model_spec
-from tflite_model_maker import object_detector
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 
-import platform
 from typing import List, NamedTuple
 import json
 import numpy as np
 from PIL import Image
-import glob
+
 import os
 from scipy import ndimage
 from skimage import data, color
@@ -27,13 +17,13 @@ from skimage.transform import rescale, resize, downscale_local_mean
 
 import pytesseract
 import cv2
-import tqdm
+#import tqdm
 
-
+print("Loading model...")
 pytesseract.pytesseract.tesseract_cmd = r'D:\Documents\ALPR\tesseract\tesseract.exe'
 print('Tesseract Engine:', pytesseract.get_tesseract_version())
 
-class Train:
+'''class Train:
     def __init__(self, train_path, val_path):
         train_data, val_data = self.load_data(train_path, val_path)
         self.training(train_data, val_data)
@@ -58,12 +48,11 @@ class Train:
         model = object_detector.create(train_data, model_spec=spec, batch_size=4, train_whole_model=True, epochs=40, validation_data=val_data)
         model.export(export_dir='.', tflite_filename='android.tflite')
 
-        model.evaluate_tflite('android.tflite', val_data)
+        model.evaluate_tflite('android.tflite', val_data)'''
 
 ## Inference Code. This is the stuff that'll be on the RPi. ##
 
-Interpreter = tf.lite.Interpreter
-load_delegate = tf.lite.experimental.load_delegate
+Interpreter = tflite.Interpreter
 
 class ObjectDetectorOptions(NamedTuple):
 
@@ -433,16 +422,17 @@ def write_to_json(now, plate_number):
 
 
 def test():
-    'Running detection now...'
+    ''''Running detection now...'
     camera = PiCamera()
     camera.resolution = (640, 480)
     camera.framerate = 32
     rawCapture = PiRGBArray(camera, size=(640, 480))
 
-    time.sleep(0.5)
+    time.sleep(0.5)'''
 
     DETECTION_THRESHOLD = 0.3
     TFLITE_MODEL_PATH = "./android.tflite"
+    IMG_PATH = './image.jpg'
 
     options = ObjectDetectorOptions(
             num_threads=4,
@@ -451,28 +441,31 @@ def test():
 
     detector = ObjectDetector(model_path=TFLITE_MODEL_PATH, options=options)
 
-    for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
+    #for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     
+    frame = Image.open(IMG_PATH)
+    frame.thumbnail((512, 512), Image.ANTIALIAS)
+    image_np = np.asarray(frame)
+    #image_np = image_np.resize((640, 480))
 
-        #frame.thumbnail((512, 512), Image.ANTIALIAS)
-        image_np = np.asarray(frame)
-        image_np = image_np.resize((640, 480))
+    # Load the TFLite model
 
-        # Load the TFLite model
+    detections = detector.detect(image_np)
 
-        detections = detector.detect(image_np)
+    image_np, plate_ls = visualize(image_np, detections)
 
-        image_np, plate_ls = visualize(image_np, detections)
+    for pl in plate_ls:
+        processed_img = process_image(pl)
 
-        for pl in plate_ls:
-            processed_img = process_image(pl)
+        tess_config = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 --psm 13 --oem 3 -c tessedit_do_invert=0"
+        
+        plate_number = pytesseract.image_to_string(processed_img, lang ='eng', config = tess_config)
 
-            tess_config = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 --psm 13 --oem 0 -c tessedit_do_invert=0"
-            
-            plate_number = pytesseract.image_to_string(processed_img, lang ='eng', config = tess_config)
+        #now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        #write_to_json(now, plate_number)
+        print(plate_number)
+    cv2.imshow('img', image_np)
+    cv2.waitKey()
 
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            write_to_json(now, plate_number)
-            print(plate_number)
 
 test()
