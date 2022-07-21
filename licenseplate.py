@@ -429,7 +429,7 @@ def test():
     'Running detection now...'
     camera = PiCamera()
     camera.resolution = (640, 480)
-    camera.framerate = 32
+    #camera.framerate = 32
     rawCapture = PiRGBArray(camera, size=(640, 480))
 
     time.sleep(0.5)
@@ -470,6 +470,8 @@ def test():
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             write_to_json(now, plate_number)
             print(plate_number)
+
+        rawCapture.truncate(0)
     cv2.imshow('img', image_np)
     cv2.waitKey()
 
