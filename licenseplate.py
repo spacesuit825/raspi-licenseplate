@@ -4,7 +4,7 @@ import numpy as np
 import os
 from picamera.array import PiRGBArray
 from picamera import PiCamera
-import datetime
+from datetime import datetime
 import time
 
 import tflite_runtime.interpreter as tflite
@@ -16,11 +16,16 @@ from PIL import Image
 
 import os
 from scipy import ndimage
+import scipy
+from scipy.spatial import distance as dist
+from scipy.stats import mode
+from collections import OrderedDict
 from skimage import data, color
 from skimage.transform import rescale, resize, downscale_local_mean
 
 import pytesseract
 import cv2
+import jellyfish
 #import tqdm
 
 print("Loading model...")
@@ -238,6 +243,7 @@ _TEXT_COLOR = (0, 0, 255)
 
 def visualize(image: np.ndarray, detections: List[Detection]):
     plate_list = []
+    box_list = []
     for detection in detections:
       # Draw bounding_box
       start_point = detection.bounding_box.left, detection.bounding_box.top
@@ -252,6 +258,8 @@ def visualize(image: np.ndarray, detections: List[Detection]):
       if class_name == 'license-plate':
         plate = image.copy()
         plate = plate[detection.bounding_box.top:detection.bounding_box.bottom, detection.bounding_box.left:detection.bounding_box.right]
+        box_list.append((detection.bounding_box.left, detection.bounding_box.top, 
+                        detection.bounding_box.right, detection.bounding_box.bottom))
         plate_list.append(plate)
       probability = round(category.score, 2)
       result_text = class_name + ' (' + str(probability) + ')'
@@ -260,7 +268,7 @@ def visualize(image: np.ndarray, detections: List[Detection]):
       cv2.putText(image, result_text, text_location, cv2.FONT_HERSHEY_PLAIN,
                   _FONT_SIZE, _TEXT_COLOR, _FONT_THICKNESS)
 
-    return image, plate_list
+    return image, plate_list, box_list
 
 def get_contour_areas(contours):
 
@@ -289,7 +297,10 @@ def detect_tilt(dist):
                 c = con
 
     if c is None:
-       c = sorted(edge_contours, key=cv2.contourArea, reverse=True)[0]
+        lst = sorted(edge_contours, key=cv2.contourArea, reverse=True)
+        if lst is not None:
+            c = lst[0]
+
     x, y, w, h = cv2.boundingRect(c)
     rect = cv2.minAreaRect(c)
     box = cv2.boxPoints(rect)
@@ -333,14 +344,14 @@ def draw_contour_clr(image, contours):
 
 def select_letters(contours, horizon):
     middle_contours = []
-    thres = 10
+    thres = 100
     for con in contours:
         intersections = len(set(range(horizon - thres, horizon + thres)).intersection(con.take(1, 2).flatten()))
         if intersections > 0:
             middle_contours.append(con)
     return middle_contours
 
-def increase_brightness(img, value=30):
+'''def increase_brightness(img, value=30):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(hsv)
 
@@ -350,19 +361,52 @@ def increase_brightness(img, value=30):
 
     final_hsv = cv2.merge((h, s, v))
     img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-    return img
+    return img'''
+
+def skew_correction(image, delta=1, limit=5):
+    def determine_score(arr, angle):
+        data = ndimage.rotate(arr, angle, reshape=False, order=0)
+        histogram = np.sum(data, axis=1, dtype=float)
+        score = np.sum((histogram[1:] - histogram[:-1]) ** 2, dtype=float)
+        return histogram, score
+
+    thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    scores = []
+    angles = np.arange(-limit, limit + delta, delta)
+    for angle in angles:
+        histogram, score = determine_score(thresh, angle)
+        scores.append(score)
+
+    best_angle = angles[scores.index(max(scores))]
+
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    print(f'Rotated image by {best_angle}')
+    M = cv2.getRotationMatrix2D(center, best_angle, 1.0)
+    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, \
+          borderMode=cv2.BORDER_REPLICATE)
+
+    return rotated
 
 def process_image(image):
     image = cv2.resize(image, (200, 100))
-    image = cv2.GaussianBlur(image,(3,3),cv2.BORDER_DEFAULT)
-    image = increase_brightness(image, 10)
-    greyImage = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = cv2.GaussianBlur(image,(1,1),cv2.BORDER_DEFAULT)
+    greyimage = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    greyimage = skew_correction(greyimage)
+    #image = increase_brightness(image, 10)
+    sharpen_filter = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    image = cv2.filter2D(image, -1, sharpen_filter)
+    
+    return greyimage
+
+    '''
     dst_RGB = cv2.Canny(image, 50, 200)
-    ret, thres = cv2.threshold(greyImage, 127, 255, 0)
+    ret, thres = cv2.threshold(greyImage, 50, 255, 0)
     ret, thresbin = cv2.threshold(greyImage, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
     dist = cv2.Canny(thres, 50, 200)
 
-    ret, threscanny = cv2.threshold(greyImage, 127, 255, 0)
+    ret, threscanny = cv2.threshold(greyImage, 50, 255, 0)
 
     angle, c = detect_tilt(threscanny)
 
@@ -411,8 +455,9 @@ def process_image(image):
         box = cv2.boundingRect(con)
         x, y, w, h = box
         stencil[y:y+h, x:x+w] = reduced_thres[y:y+h, x:x+w]
-
-    return stencil
+    
+    cv2.imwrite('num.jpg', stencil)
+    return stencil'''
 
 def write_to_json(now, plate_number):
     if not os.path.isfile('plates.json'):
@@ -424,19 +469,126 @@ def write_to_json(now, plate_number):
     with open('plates.json', 'w') as f:
         json.dump(data, f)
 
+def read_whitelist():
+    with open('whitelist', 'r') as f:
+        lines = f.readlines()
+        lines = [line.rstrip() for line in lines]
+    return lines
+
+class Tracking:
+    def __init__(self):
+        self.next_object_id = 0
+        self.objects = OrderedDict()
+        self.object_strings = OrderedDict()
+        self.disappeared = OrderedDict()
+        self.max_disappeared = 50 # frames until the object is saved.
+
+    def register_object(self, centroid):
+        self.objects[self.next_object_id] = centroid
+        self.object_strings[self.next_object_id] = []
+        self.disappeared[self.next_object_id] = 0
+        self.next_object_id += 1
+
+    def deregister_object(self, object_ID):
+        del self.objects[object_ID]
+        del self.object_strings[object_ID]
+        del self.disappeared[object_ID]
+
+    def str_compile(self, object, plate_number):
+        object_id = object[0]
+        if len(plate_number) == 6:
+            self.object_strings[object_id].append(plate_number)
+        else:
+            return ''
+        if len(self.object_strings[object_id]) > 0:
+            print(self.object_strings[object_id])
+            return self.frequency_analysis(object_id)
+        else:
+            return ''
+    
+    def frequency_analysis(self, object_id):
+        lst = self.object_strings[object_id].copy()
+        potential_plate = ''.join(mode(i).mode[0] for i in list(zip(*lst)))
+        return potential_plate
+
+    def update_between_frames(self, rects):
+        if len(rects) == 0:
+            for object_id in list(self.disappeared.keys()):
+                self.disappeared[object_id] += 1
+
+                if self.disappeared[object_id] > self.max_disappeared:
+                    self.deregister_object(object_id)
+            return self.objects
+        
+        input_centres = np.zeros((len(rects), 2), dtype='int')
+        for (i, (startX, startY, endX, endY)) in enumerate(rects):
+            c_x = int((startX + endX) / 2)
+            c_y = int((startY + endY) / 2)
+            input_centres[i] = (c_x, c_y)
+        
+        if len(self.objects) == 0:
+            for i in range(0, len(input_centres)):
+                self.register_object(input_centres[i])
+
+        else:
+            object_ids = list(self.objects.keys())
+            object_centres = list(self.objects.values())
+
+            dst = dist.cdist(np.array(object_centres), input_centres)
+
+            rows = dst.min(axis=1).argsort()
+            cols = dst.argmin(axis=1)[rows]
+
+            used_rows = set()
+            used_cols = set()
+
+            for (row, col) in zip(rows, cols):
+                if row in used_rows or col in used_cols:
+                    continue
+                
+                object_id = object_ids[row]
+                self.objects[object_id] = input_centres[col]
+                self.disappeared[object_id] = 0
+
+                used_rows.add(row)
+                used_cols.add(col)
+
+                unused_rows = set(range(0, dst.shape[0])).difference(used_rows)
+                unused_cols = set(range(0, dst.shape[1])).difference(used_cols)
+
+                if dst.shape[0] >= dst.shape[1]:
+                    for row in unused_rows:
+                        object_id = object_ids[row]
+                        self.disappeared[object_id] += 1
+
+                        if self.disappeared[object_id] > self.max_disappeared:
+                            self.deregister_object(object_id)
+
+                else:
+                    for cols in unused_cols:
+                        self.register_object(input_centres[cols])
+
+            return self.objects
+
+def jaro_winkler_dist(whitelist, plate_number):
+    threshold = 0.8
+    for i in whitelist:
+        metric = jellyfish.jaro_distance(i, plate_number)
+        if metric >= 0.8:
+            return i, metric
+    return plate_number, 0
 
 def test():
-    'Running detection now...'
+    print('Running detection now...')
     camera = PiCamera()
-    camera.resolution = (640, 480)
-    #camera.framerate = 32
-    rawCapture = PiRGBArray(camera, size=(640, 480))
+    camera.resolution = (1280, 720)
+    camera.zoom = (0.25,0.25,0.5,0.5)
+    rawCapture = PiRGBArray(camera, size=(1280, 720))
 
     time.sleep(0.5)
 
-    DETECTION_THRESHOLD = 0.3
+    DETECTION_THRESHOLD = 0.4
     TFLITE_MODEL_PATH = "./android.tflite"
-    #IMG_PATH = './image.jpg'
 
     options = ObjectDetectorOptions(
             num_threads=4,
@@ -445,35 +597,65 @@ def test():
 
     detector = ObjectDetector(model_path=TFLITE_MODEL_PATH, options=options)
 
+    whitelist = read_whitelist()
+
+    tracker = Tracking()
+
     for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
-        
-        frame = frame.array
+        frame = frame.array.copy()
         frame = np.array(frame)
         frame = Image.fromarray(frame)
         frame.thumbnail((512, 512), Image.ANTIALIAS)
         image_np = np.asarray(frame)
-        #image_np = image_np.resize((640, 480))
 
         # Load the TFLite model
 
         detections = detector.detect(image_np)
 
-        image_np, plate_ls = visualize(image_np, detections)
+        image_np, plate_ls, box_ls = visualize(image_np, detections)
 
-        for pl in plate_ls:
-            processed_img = process_image(pl)
+        objects = tracker.update_between_frames(box_ls)
+        if objects is not None:
+            for (object_id, centre) in objects.items():
+                text = 'ID {}'.format(object_id)
+                cv2.putText(image_np, text, (centre[0] - 10, centre[1] - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            tess_config = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 --psm 13 --oem 3 -c tessedit_do_invert=0"
-            
-            plate_number = pytesseract.image_to_string(processed_img, lang ='eng', config = tess_config)
+        for n, pl in enumerate(plate_ls):
+            if pl.size != 0:
+                print('Plate detected... ')
 
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            write_to_json(now, plate_number)
-            print(plate_number)
+                now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                potential_plate = ''
+
+
+                processed_img = process_image(pl)
+
+                cv2.imwrite('hello.jpg', processed_img)
+                
+                tess_config = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 --psm 13 --oem 1 -c tessedit_do_invert=0 -c page_separator="""
+
+                plate_number = pytesseract.image_to_string(processed_img, config = tess_config)
+
+                plate_number = plate_number.strip('\n')
+                if objects is not None:
+                    if plate_number != '':
+                        potential_plate = tracker.str_compile(list(objects.items())[n], plate_number)
+
+                if potential_plate != '':
+                    potential_plate, metric = jaro_winkler_dist(whitelist, potential_plate)
+                    write_to_json(now, potential_plate)
+                    if metric >= 0.8:
+                        print(f'The plate {potential_plate} was detected! It matches a whitelisted plate with a confidence of {metric*100}%.')
+                    else:
+                        print(f'The plate {potential_plate} was detected! It does not match a whitelisted plate, but this may be an error',
+                            'so an image of the car has been uploaded.')
+
+                if potential_plate != '':
+                    cv2.imwrite(f'{now}_full_image.jpg', image_np)
+                    cv2.imwrite(f'{now}.jpg', pl)
 
         rawCapture.truncate(0)
-    cv2.imshow('img', image_np)
-    cv2.waitKey()
-
+        #time.sleep(0.5)
 
 test()
